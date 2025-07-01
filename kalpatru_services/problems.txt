@@ -1,0 +1,21 @@
+bro UI me bss kuch additional changes chiye mujhe, vo krdo:
+
+1) ek side down me circle me ' Help ' button laga do, jispr headphone & microphone bna ho aur uspr click krte hi mere whatsapp pr pahuch jaye for help, with starting message: " Hi Aditya, I want help regarding Kalptaru Services app. "
+
+2) jb Maid ka form fill kiya jaye , tb ek drop down board also ana chiye jisme options honge: "Jhadu, pocha, dusting, cooking, clothes washing, etc ( jo bhi ghar pr kaamwali ke kaam krwate h )" and we can select multiple options based on work required. aur phir uske niche ek additional typing box ana chiye: " Write note for maid "
+
+3) jb milkman ka form fill kiya jaye tb ek dropdown aisa jisme litres of milk pucha jaye ( 1, 2, 3, 4, 5), baaki remarks typing box to rhega hi
+
+4) Register as service provider & login as worker buttons ko niche rakho ( bottom of mobile screen )
+
+5) register as service provider se highlight hata do
+
+6) ye app mostly log mobile pr hi use krne wale hai, toh mobile me fit hone wala hi UI banao + sabkuch center me align kro
+
+7) dashboard me jo black buttons hai, unko cards type buttons me krdo, jisme ek black box ka button hoga, center me bada sa logo bana hoga aur thoda uske niche likha hoga us button ka name
+
+8) jb flat no type mt karwao, blki dropdown se select ka option daalo sabhi forms mei ( starting with floor no: (floor no)01 to (floor no)08
+
+9) aur baaki register as worker ke time pr details lo: Name, phone number, profession ( dropdown krdo isko, options me jo apni services h keval vhi aaye )
+
+10) press wala 6 rs per cloth leta h, toh no of clothes bhi daalo press wale ke form 
