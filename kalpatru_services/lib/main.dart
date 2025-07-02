@@ -195,13 +195,13 @@ class KalptaruApp extends StatelessWidget {
 class SelectServicePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final services = [
-      'Maids (कामवाली)',
-      'Electrician (बिजली मिस्त्री)',
-      'Milkman (दूधवाला)',
-      'Iron (कपड़े प्रेस)',
-      'Plumber (प्लंबर)',
-    ];
+  final services = [
+  '🧹 Maids (कामवाली)',
+  '💡 Electrician (बिजली मिस्त्री)',
+  '🥛 Milkman (दूधवाला)',
+  '🧺 Iron (कपड़े प्रेस)',
+  '🔧 Plumber (प्लंबर)',
+];
 
     return Scaffold(
       appBar: AppBar(title: Text("Select Service")),
@@ -343,18 +343,19 @@ await userDoc.set({
                   decoration: InputDecoration(labelText: 'Role'),
                 ),
                 if (role == 'Worker')
-                  DropdownButtonFormField<String>(
-                    value: profession,
-                    items: [
-                      'Maids (कामवाली)',
-                      'Electrician (बिजली मिस्त्री)',
-                      'Milkman (दूधवाला)',
-                      'Iron (कपड़े प्रेस)',
-                      'Plumber (प्लंबर)',
-                    ].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                    onChanged: (v) => setState(() => profession = v!),
-                    decoration: InputDecoration(labelText: 'Profession'),
-                  ),
+DropdownButtonFormField<String>(
+  value: profession,
+  onChanged: (val) => setState(() => profession = val!),
+  decoration: InputDecoration(labelText: 'Select Profession'),
+  items: [
+    '🧹 Maids (कामवाली)',
+    '💡 Electrician (बिजली मिस्त्री)',
+    '🥛 Milkman (दूधवाला)',
+    '🧺 Iron (कपड़े प्रेस)',
+    '🔧 Plumber (प्लंबर)',
+  ].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+),
+
               ],
               SizedBox(height: 16),
               ElevatedButton(
@@ -433,7 +434,6 @@ class _MainDashboardState extends State<MainDashboard> {
 
   Future<void> logoutUser() async {
     await FirebaseAuth.instance.signOut();
-    await DatabaseHelper.instance.logoutAll();
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => AuthGateScreen()),
@@ -487,7 +487,6 @@ class _MainDashboardState extends State<MainDashboard> {
               IconButton(
   icon: Icon(Icons.logout),
   onPressed: () async {
-    await DatabaseHelper.instance.logoutAll();  // 👈 Call here
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => EmailAuthScreen()),
@@ -1120,12 +1119,6 @@ class DatabaseHelper {
     await db.update('workers', {'isLoggedIn': 1}, where: 'phone = ?', whereArgs: [phone]);
   }
 
-  Future<void> logoutAll() async {
-    final db = await database;
-   
- 
-  }
-
   Future<List<Map<String, dynamic>>> getUsers() async {
     final db = await database;
     return await db.query('users');
@@ -1161,6 +1154,7 @@ class ViewRequestsPage extends StatefulWidget {
 
 class _ViewRequestsPageState extends State<ViewRequestsPage> {
   String currentPhone = '';
+  String currentProfession = ''; // ✅ store once
   List<Map<String, dynamic>> requests = [];
 
   @override
@@ -1177,12 +1171,22 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
     );
     if (loggedIn.isNotEmpty) {
       currentPhone = loggedIn['phone'];
-      loadRequests();
+      currentProfession = loggedIn['profession']; // ✅ profession stored
+      await loadRequests(); // ✅ cleaner call
     }
   }
 
   Future<void> loadRequests() async {
-    final data = await DatabaseHelper.instance.getRequests(currentPhone);
+    final snapshot = await FirebaseFirestore.instance
+        .collection('requests')
+        .where('assignedTo', isNull: true)
+        .where('serviceType', isEqualTo: currentProfession)
+        .get();
+
+    final data = snapshot.docs
+        .map((doc) => {'id': doc.id, ...doc.data() as Map<String, dynamic>})
+        .toList();
+
     setState(() => requests = data);
   }
 
@@ -1191,43 +1195,42 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
     await http.post(url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        "topic": "expire_request_\$requestId",
+        "topic": "expire_request_$requestId", // ✅ fixed interpolation
         "title": "Request Taken",
         "body": "This request has been accepted by someone else.",
       }),
     );
   }
 
-  Future<void> sendFCMToProfessionTopic(String profession) async {
-    final topic = profession.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+  Future<void> sendFCMToProfessionTopic() async {
+    final topic = currentProfession.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
     final url = Uri.parse("https://kalpatru-notifier.onrender.com/send-notification");
     await http.post(url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         "topic": topic,
         "title": "Service Request Cancelled",
-        "body": "A service request for \$profession is active again.",
+        "body": "A service request for $currentProfession is active again.",
       }),
     );
   }
 
-Future<void> assignRequest(int id, String phone, Map<String, dynamic> req) async {
-  final db = await DatabaseHelper.instance.database;
-  await db.update('requests', {'assignedTo': phone}, where: 'id = ?', whereArgs: [id]);
+  Future<void> assignRequest(int id, String phone, Map<String, dynamic> req) async {
+    final db = await DatabaseHelper.instance.database;
+    await db.update('requests', {'assignedTo': phone}, where: 'id = ?', whereArgs: [id]);
 
-  final requests = await FirebaseFirestore.instance
-      .collection('requests')
-      .where('block', isEqualTo: req['block'])
-      .where('flat', isEqualTo: req['flat'])
-      .where('date', isEqualTo: req['date'])
-      .where('time', isEqualTo: req['time'])
-      .get();
+    final requests = await FirebaseFirestore.instance
+        .collection('requests')
+        .where('block', isEqualTo: req['block'])
+        .where('flat', isEqualTo: req['flat'])
+        .where('date', isEqualTo: req['date'])
+        .where('time', isEqualTo: req['time'])
+        .get();
 
-  for (var doc in requests.docs) {
-    await doc.reference.update({'assignedTo': phone});
+    for (var doc in requests.docs) {
+      await doc.reference.update({'assignedTo': phone});
+    }
   }
-}
-
 
   Future<void> cancelRequest(int id, Map<String, dynamic> req) async {
     final confirm = await showDialog<bool>(
@@ -1244,9 +1247,8 @@ Future<void> assignRequest(int id, String phone, Map<String, dynamic> req) async
 
     if (confirm == true) {
       await DatabaseHelper.instance.unassignRequest(id);
-      await sendFCMToProfessionTopic(req['serviceType']);
+      await sendFCMToProfessionTopic(); // ✅ use stored profession
       await loadRequests();
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("⚠️ Request cancelled and reactivated."))
       );
@@ -1266,69 +1268,67 @@ Future<void> assignRequest(int id, String phone, Map<String, dynamic> req) async
                 final assignedTo = req['assignedTo'];
                 final requestId = req['id'];
 
-               return Card(
-  color: Colors.black,
-  margin: EdgeInsets.all(8),
-  child: ListTile(
-    title: Text(req['serviceType'], style: TextStyle(color: Colors.white)),
-    subtitle: Text(
-      'Issue: ${req['issue']}\n'
-      'Date: ${req['date']} at ${req['time']}\n'
-      'Block: ${req['block']} • Flat: ${req['flat']}\n'
-      'Status: ${assignedTo == null ? "Pending" : assignedTo == currentPhone ? "You Accepted" : "Assigned to other"}',
-      style: TextStyle(color: Colors.white70),
-    ),
-    trailing: assignedTo == null
-        ? Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-  icon: Icon(Icons.check, color: Colors.green),
-  onPressed: () async {
-    await assignRequest(requestId, currentPhone, req); // ✅ fix here
-    await sendExpireNotification(requestId.toString());
-    await loadRequests();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("✅ Request accepted!"))
-    );
-  },
-),
-
-              IconButton(
-                icon: Icon(Icons.close, color: Colors.red),
-                onPressed: () async {
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      title: Text("Reject Request?"),
-                      content: Text("Are you sure you want to reject this request?"),
-                      actions: [
-                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text("No")),
-                        ElevatedButton(onPressed: () => Navigator.pop(context, true), child: Text("Yes")),
-                      ],
+                return Card(
+                  color: Colors.black,
+                  margin: EdgeInsets.all(8),
+                  child: ListTile(
+                    title: Text(req['serviceType'], style: TextStyle(color: Colors.white)),
+                    subtitle: Text(
+                      'Issue: ${req['issue']}\n'
+                      'Date: ${req['date']} at ${req['time']}\n'
+                      'Block: ${req['block']} • Flat: ${req['flat']}\n'
+                      'Status: ${assignedTo == null ? "Pending" : assignedTo == currentPhone ? "You Accepted" : "Assigned to other"}',
+                      style: TextStyle(color: Colors.white70),
                     ),
-                  );
+                    trailing: assignedTo == null
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: Icon(Icons.check, color: Colors.green),
+                                onPressed: () async {
+                                  await assignRequest(requestId, currentPhone, req);
+                                  await sendExpireNotification(requestId.toString());
+                                  await loadRequests();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("✅ Request accepted!"))
+                                  );
+                                },
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.close, color: Colors.red),
+                                onPressed: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (_) => AlertDialog(
+                                      title: Text("Reject Request?"),
+                                      content: Text("Are you sure you want to reject this request?"),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text("No")),
+                                        ElevatedButton(onPressed: () => Navigator.pop(context, true), child: Text("Yes")),
+                                      ],
+                                    ),
+                                  );
 
-                  if (confirm == true) {
-                    await DatabaseHelper.instance.markRejected(requestId, currentPhone);
-                    await loadRequests();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("❌ Request rejected."))
-                    );
-                  }
-                },
-              ),
-            ],
-          )
-        : assignedTo == currentPhone
-            ? TextButton(
-                onPressed: () => cancelRequest(requestId, req),
-                child: Text('Cancel', style: TextStyle(color: Colors.orange)),
-              )
-            : null,
-  ),
-);
-
+                                  if (confirm == true) {
+                                    await DatabaseHelper.instance.markRejected(requestId, currentPhone);
+                                    await loadRequests();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text("❌ Request rejected."))
+                                    );
+                                  }
+                                },
+                              ),
+                            ],
+                          )
+                        : assignedTo == currentPhone
+                            ? TextButton(
+                                onPressed: () => cancelRequest(requestId, req),
+                                child: Text('Cancel', style: TextStyle(color: Colors.orange)),
+                              )
+                            : null,
+                  ),
+                );
               },
             ),
     );
@@ -1350,15 +1350,17 @@ Future<void> registerWithEmail(String email, String password) async {
   }
 }
 
-Future<void> loginWithEmail(String email, String password) async {
+Future<String?> loginWithEmail(String email, String password) async {
   try {
     await FirebaseAuth.instance.signInWithEmailAndPassword(
       email: email,
       password: password,
     );
     print('✅ Login successful');
+    return null;
   } catch (e) {
     print('❌ Login failed: $e');
+    return e.toString().split('] ').last;
   }
 }
 
@@ -1376,7 +1378,7 @@ class RegisterExtraInfoScreen extends StatefulWidget {
 }
 
 class _RegisterExtraInfoScreenState extends State<RegisterExtraInfoScreen> {
-  String name = '', role = 'User', profession = 'Maids (कामवाली)';
+  String name = '', role = 'User', profession = '🧹 Maids (कामवाली)';
 
   @override
   Widget build(BuildContext context) {
@@ -1402,12 +1404,12 @@ class _RegisterExtraInfoScreenState extends State<RegisterExtraInfoScreen> {
               DropdownButtonFormField<String>(
                 value: profession,
                 items: [
-                  'Maids (कामवाली)',
-                  'Electrician (बिजली मिस्त्री)',
-                  'Milkman (दूधवाला)',
-                  'Iron (कपड़े प्रेस)',
-                  'Plumber (प्लंबर)',
-                ].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+  '🧹 Maids (कामवाली)',
+  '💡 Electrician (बिजली मिस्त्री)',
+  '🥛 Milkman (दूधवाला)',
+  '🧺 Iron (कपड़े प्रेस)',
+  '🔧 Plumber (प्लंबर)',
+].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
                 onChanged: (val) => setState(() => profession = val!),
                 decoration: InputDecoration(labelText: 'Select Profession'),
               ),
@@ -1542,7 +1544,14 @@ class _EmailAuthScreenState extends State<EmailAuthScreen> {
                   return;
                 }
 
-                await loginWithEmail(email, pass);
+                final error = await loginWithEmail(email, pass);
+if (error != null) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('❌ Login failed: $error')),
+  );
+  return;
+}
+
 
                 final existingUsers = (await DatabaseHelper.instance.getUsers())
                     .where((u) => u['phone'] == email)
