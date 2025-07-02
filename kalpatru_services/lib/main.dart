@@ -1211,24 +1211,23 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
     );
   }
 
-  Future<void> assignRequest(int id, String phone) async {
-    final db = await DatabaseHelper.instance.database;
-    await db.update('requests', {'assignedTo': phone}, where: 'id = ?', whereArgs: [id]);
-    
-    final requests = await FirebaseFirestore.instance
-    .collection('requests')
-    .where('block', isEqualTo: req['block'])
-    .where('flat', isEqualTo: req['flat'])
-    .where('date', isEqualTo: req['date'])
-    .where('time', isEqualTo: req['time'])
-    .get();
+Future<void> assignRequest(int id, String phone, Map<String, dynamic> req) async {
+  final db = await DatabaseHelper.instance.database;
+  await db.update('requests', {'assignedTo': phone}, where: 'id = ?', whereArgs: [id]);
 
-for (var doc in requests.docs) {
-  await doc.reference.update({'assignedTo': phone});
+  final requests = await FirebaseFirestore.instance
+      .collection('requests')
+      .where('block', isEqualTo: req['block'])
+      .where('flat', isEqualTo: req['flat'])
+      .where('date', isEqualTo: req['date'])
+      .where('time', isEqualTo: req['time'])
+      .get();
+
+  for (var doc in requests.docs) {
+    await doc.reference.update({'assignedTo': phone});
+  }
 }
 
-    
-  }
 
   Future<void> cancelRequest(int id, Map<String, dynamic> req) async {
     final confirm = await showDialog<bool>(
@@ -1284,16 +1283,17 @@ for (var doc in requests.docs) {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: Icon(Icons.check, color: Colors.green),
-                onPressed: () async {
-                  await assignRequest(requestId, currentPhone);
-                  await sendExpireNotification(requestId.toString());
-                  await loadRequests();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("✅ Request accepted!"))
-                  );
-                },
-              ),
+  icon: Icon(Icons.check, color: Colors.green),
+  onPressed: () async {
+    await assignRequest(requestId, currentPhone, req); // ✅ fix here
+    await sendExpireNotification(requestId.toString());
+    await loadRequests();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("✅ Request accepted!"))
+    );
+  },
+),
+
               IconButton(
                 icon: Icon(Icons.close, color: Colors.red),
                 onPressed: () async {
