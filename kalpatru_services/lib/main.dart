@@ -14,6 +14,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final FlutterLocalNotificationsPlugin flnp = FlutterLocalNotificationsPlugin();
 
 @pragma('vm:entry-point')
@@ -25,51 +26,37 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> acceptRequest(String requestId) async {
   await RingtoneService.stopRingtone();
-
   final db = await DatabaseHelper.instance.database;
   final workers = await db.query('workers', where: 'isLoggedIn = 1');
   if (workers.isEmpty) return;
   final currentPhone = workers.first['phone'] as String;
-
-  await db.update(
-    'requests',
-    {'assignedTo': currentPhone},
-    where: 'id = ?',
-    whereArgs: [int.parse(requestId)],
-  );
-
+  await db.update('requests', {'assignedTo': currentPhone}, where: 'id = ?', whereArgs: [int.parse(requestId)]);
   await sendExpireNotification(requestId);
 }
 
 Future<void> rejectRequest(String requestId) async {
   await RingtoneService.stopRingtone();
-
   final db = await DatabaseHelper.instance.database;
   final workers = await db.query('workers', where: 'isLoggedIn = 1');
   if (workers.isEmpty) return;
   final currentPhone = workers.first['phone'] as String;
-
-  await DatabaseHelper.instance
-      .markRejected(int.parse(requestId), currentPhone);
+  await DatabaseHelper.instance.markRejected(int.parse(requestId), currentPhone);
 }
 
 Future<void> sendExpireNotification(String requestId) async {
-  final url = Uri.parse("http://ngrok:3000/send-notification");
-
+  final url = Uri.parse("https://kalpatru-notifier.onrender.com/send-notification");
   await http.post(url,
     headers: {'Content-Type': 'application/json'},
     body: jsonEncode({
-      "topic": "expire_request_$requestId",
+      "topic": "expire_request_\$requestId",
       "title": "Request Taken",
       "body": "This request has been accepted by someone else.",
     }),
   );
 }
 
-
-
 const AndroidNotificationChannel requestChannel = AndroidNotificationChannel(
-  'request_channel', // must match index.js
+  'request_channel',
   'Service Requests',
   description: 'Channel for new service request notifications',
   importance: Importance.max,
@@ -77,41 +64,35 @@ const AndroidNotificationChannel requestChannel = AndroidNotificationChannel(
   sound: RawResourceAndroidNotificationSound('ringtone'),
 );
 
-
 class RingtoneService {
   static final AudioPlayer _player = AudioPlayer();
-
   static Future<void> playRingtone() async {
     try {
       await _player.setReleaseMode(ReleaseMode.loop);
       await _player.play(AssetSource('ringtone.mpeg'));
     } catch (e) {
-      print("Error playing ringtone: $e");
+      print("Error playing ringtone: \$e");
     }
   }
-
   static Future<void> stopRingtone() async {
     try {
       await _player.stop();
     } catch (e) {
-      print("Error stopping ringtone: $e");
+      print("Error stopping ringtone: \$e");
     }
   }
 }
 
-
-	Future<void> handleRequestNotification(Map<String, dynamic> data) async {
+Future<void> handleRequestNotification(Map<String, dynamic> data) async {
   final serviceType = data['serviceType'];
-  final issue = data['issue'];
   final block = data['block'];
   final flat = data['flat'];
   final requestId = data['requestId'];
 
-  // Show local notification with Accept/Reject buttons
   await flnp.show(
     0,
     "New Service Request",
-    "$serviceType requested at $block-$flat",
+    "\$serviceType requested at \$block-\$flat",
     NotificationDetails(
       android: AndroidNotificationDetails(
         requestChannel.id,
@@ -122,30 +103,26 @@ class RingtoneService {
         playSound: true,
         sound: RawResourceAndroidNotificationSound('ringtone'),
         actions: <AndroidNotificationAction>[
-          AndroidNotificationAction('ACCEPT_$requestId', 'Accept'),
-          AndroidNotificationAction('REJECT_$requestId', 'Reject'),
+          AndroidNotificationAction('ACCEPT_\$requestId', 'Accept'),
+          AndroidNotificationAction('REJECT_\$requestId', 'Reject'),
         ],
       ),
     ),
   );
-
   await RingtoneService.playRingtone();
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   if (Platform.isLinux) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
-    // ❌ Firebase.initializeApp() not supported on Linux
   } else {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     FirebaseMessaging.onMessage.listen((message) async {
       final data = message.data;
-
       if (data['actionType'] == 'expire_request') {
         await flnp.cancel(0);
         await RingtoneService.stopRingtone();
@@ -157,23 +134,33 @@ void main() async {
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
 
-    await flnp
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(requestChannel);
+    await flnp.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(requestChannel);
   }
 
-  // ✅ Move this OUTSIDE the `if-else` block. It runs on all platforms
   await flnp.initialize(
     InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     ),
     onDidReceiveNotificationResponse: (response) async {
       final actionId = response.actionId ?? '';
-
-      if (actionId.startsWith('ACCEPT_')) {
+      final context = navigatorKey.currentContext;
+      if (actionId.startsWith('ACCEPT_') && context != null) {
         final requestId = actionId.replaceFirst('ACCEPT_', '');
-        await acceptRequest(requestId);
+        bool? confirmed = await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text("Confirm"),
+            content: Text("Do you really want to accept this job?"),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: Text("No")),
+              ElevatedButton(onPressed: () => Navigator.pop(context, true), child: Text("Yes")),
+            ],
+          ),
+        );
+        if (confirmed == true) {
+          await acceptRequest(requestId);
+          await FirebaseMessaging.instance.unsubscribeFromTopic("expire_request_\$requestId");
+        }
       } else if (actionId.startsWith('REJECT_')) {
         final requestId = actionId.replaceFirst('REJECT_', '');
         await rejectRequest(requestId);
@@ -181,13 +168,9 @@ void main() async {
     },
   );
 
-  // ✅ Ensure DB is initialized before app starts
   await DatabaseHelper.instance.database;
-
   runApp(KalptaruApp());
 }
-
-
 
 class KalptaruApp extends StatelessWidget {
   @override
@@ -195,11 +178,12 @@ class KalptaruApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Kalptaru Services',
+      navigatorKey: navigatorKey,
       theme: ThemeData.dark().copyWith(
         colorScheme: ColorScheme.dark(primary: Colors.teal),
         textTheme: ThemeData.dark().textTheme.apply(fontFamily: 'Roboto'),
       ),
-      home: EmailAuthScreen(),
+      home: AuthGateScreen(),
     );
   }
 }
@@ -417,9 +401,20 @@ class _MainDashboardState extends State<MainDashboard> {
     setState(() => role = 'Unknown');
   }
 
+  Future<void> logoutUser() async {
+    await FirebaseAuth.instance.signOut();
+    await DatabaseHelper.instance.logoutAll();
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => AuthGateScreen()),
+      (route) => false,
+    );
+  }
+
   Widget _tile(BuildContext context, IconData icon, String title, VoidCallback onTap) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
       child: Card(
         color: Colors.black,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -445,8 +440,8 @@ class _MainDashboardState extends State<MainDashboard> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Opacity(
-          opacity: 0.9,
+        ColorFiltered(
+          colorFilter: ColorFilter.mode(Colors.black.withOpacity(0.3), BlendMode.darken),
           child: Image.asset(
             'assets/kalpatru_bg.jpeg',
             fit: BoxFit.cover,
@@ -462,79 +457,69 @@ class _MainDashboardState extends State<MainDashboard> {
               IconButton(
                 icon: Icon(Icons.logout),
                 tooltip: 'Logout',
-                onPressed: () async {
-                  await FirebaseAuth.instance.signOut();
-                  await DatabaseHelper.instance.logoutAll();
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(builder: (_) => EmailAuthScreen()),
-                    (route) => false,
-                  );
-                },
+                onPressed: logoutUser,
               )
             ],
           ),
-          body: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: 400),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  SizedBox(height: 12),
-                  if (role.isNotEmpty && role != 'Unknown') ...[
-                    Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: Column(
-                        children: [
-                          Text("Logged in as: $role", style: TextStyle(color: Colors.white, fontSize: 16)),
-                          Text("Email: ${widget.phone}", style: TextStyle(color: Colors.white70)),
-                          if (role == 'Worker')
-                            Text("Profession: $profession", style: TextStyle(color: Colors.white70)),
-                        ],
-                      ),
-                    ),
-                    SizedBox(height: 16),
-                  ],
-                  Expanded(
-                    child: ListView(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          body: role.isEmpty
+              ? Center(child: CircularProgressIndicator())
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: 400),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        if (role == 'Worker')
-                          _tile(context, Icons.notifications_active, 'View Requests', () {
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => ViewRequestsPage()));
-                          }),
-                        _tile(context, Icons.home_repair_service, 'Get Services', () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => HomePage()));
-                        }),
-                        _tile(context, Icons.info_outline, 'About Us', () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => AboutPage()));
-                        }),
-                        _tile(context, Icons.apartment, 'Apartment Details', () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => ApartmentPage()));
-                        }),
-                        _tile(context, Icons.volunteer_activism, 'Support / Donate', () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => DonationPage()));
-                        }),
+                        SizedBox(height: 12),
+                        if (role != 'Unknown') ...[
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Column(
+                              children: [
+                                Text("Logged in as: $role", style: TextStyle(color: Colors.white, fontSize: 16)),
+                                Text("Email: ${widget.phone}", style: TextStyle(color: Colors.white70)),
+                                if (role == 'Worker')
+                                  Text("Profession: $profession", style: TextStyle(color: Colors.white70)),
+                              ],
+                            ),
+                          ),
+                          SizedBox(height: 16),
+                        ],
+                        Expanded(
+                          child: ListView(
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            children: [
+                              if (role == 'Worker')
+                                _tile(context, Icons.notifications_active, 'View Requests', () {
+                                  Navigator.push(context, MaterialPageRoute(builder: (_) => ViewRequestsPage()));
+                                }),
+                              _tile(context, Icons.home_repair_service, 'Get Services', () {
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => MainDashboard(phone: widget.phone)));
+                              }),
+                              _tile(context, Icons.info_outline, 'About Us', () {
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => AboutPage()));
+                              }),
+                              _tile(context, Icons.apartment, 'Apartment Details', () {
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => ApartmentPage()));
+                              }),
+                              _tile(context, Icons.volunteer_activism, 'Support / Donate', () {
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => DonationPage()));
+                              }),
+                            ],
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          child: ElevatedButton.icon(
+                            icon: Icon(Icons.logout),
+                            label: Text('Logout'),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                            onPressed: logoutUser,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: ElevatedButton.icon(
-                      icon: Icon(Icons.logout),
-                      label: Text('Logout'),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                      onPressed: () async {
-                        await FirebaseAuth.instance.signOut();
-                        await DatabaseHelper.instance.logoutAll();
-                        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => EmailAuthScreen()));
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+                ),
           floatingActionButton: FloatingActionButton(
             backgroundColor: Colors.tealAccent,
             onPressed: () async {
@@ -542,9 +527,11 @@ class _MainDashboardState extends State<MainDashboard> {
               const phone = "919369250645";
               final url = Uri.parse("https://wa.me/$phone?text=${Uri.encodeFull(message)}");
               if (await canLaunchUrl(url)) {
-                await launchUrl(url);
+                await launchUrl(url, mode: LaunchMode.externalApplication);
               } else {
-                throw 'Could not launch WhatsApp';
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("WhatsApp not installed or URL can't be launched")),
+                );
               }
             },
             child: Icon(Icons.headset_mic, color: Colors.black),
@@ -587,48 +574,67 @@ class DonationPage extends StatelessWidget {
   }
 }
 
-// ---------------------- HomePage ----------------------
-class HomePage extends StatelessWidget {
-  final List<Map<String, String>> services = [
-    {'title': 'Maids (कामवाली)', 'icon': '🧹'},
-    {'title': 'Electrician (बिजली मिस्त्री)', 'icon': '💡'},
-    {'title': 'Milkman (दूधवाला)', 'icon': '🥛'},
-    {'title': 'Iron (कपड़े प्रेस)', 'icon': '🧺'},
-    {'title': 'Plumber (प्लंबर)', 'icon': '🔧'},
-  ];
-
+class PaymentPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Center(child: Text('Kalptaru Services'))),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 400),
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Center(
-                child: Text(
-                  'Which Service You Want Today?',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
+      appBar: AppBar(title: Text("Payment / Donation")),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: ListView(
+          children: [
+            Text(
+              "Pay for completed service OR support Kalptaru app.",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 20),
+            Text(
+              "This payment includes worker charges + small app commission.\nPlease pay only after the work is done.",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 30),
+            Image.asset('assets/qr.jpeg', height: 200),
+            SizedBox(height: 20),
+            Center(
+              child: Column(
+                children: [
+                  Text("Scan the QR code to pay", style: TextStyle(fontSize: 16)),
+                  SizedBox(height: 10),
+                  Text("UPI ID:", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text("acpedwardlivingston-1@oksbi", style: TextStyle(fontSize: 16, color: Colors.tealAccent)),
+                ],
               ),
-              SizedBox(height: 10),
-              ...services.map((service) {
-                return Card(
-                  color: Colors.black,
-                  child: ListTile(
-                    leading: Text(service['icon']!, style: TextStyle(fontSize: 28, color: Colors.white)),
-                    title: Text(service['title']!, style: TextStyle(fontSize: 18, color: Colors.white)),
-                    trailing: Icon(Icons.arrow_forward_ios, color: Colors.white),
-                    onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => BookingForm(serviceType: service['title']!)));
-                    },
-                  ),
-                );
-              }).toList(),
-            ],
-          ),
+            ),
+            SizedBox(height: 30),
+            Divider(thickness: 1),
+            SizedBox(height: 20),
+            Text(
+              "After payment, the worker will take a photo of the payment receipt and send it to us on WhatsApp for verification.",
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: () async {
+                const message = "Hi Aditya, this is the payment screenshot for completed service.";
+                const phone = "919369250645";
+                final url = Uri.parse("https://wa.me/$phone?text=${Uri.encodeFull(message)}");
+
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text("Could not open WhatsApp"),
+                  ));
+                }
+              },
+              icon: Icon(Icons.chat),
+              label: Text("Contact Admin on WhatsApp"),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            ),
+          ],
         ),
       ),
     );
@@ -652,6 +658,12 @@ class _BookingFormState extends State<BookingForm> {
   String selectedHour = '10', selectedMeridiem = 'AM';
   List<String> hours = List.generate(12, (i) => '${i + 1}');
 
+  String? selectedFloor;
+  String? selectedFlatOnFloor;
+
+  List<String> floors = List.generate(12, (i) => '${i + 1}');
+  List<String> flatsOnFloor = List.generate(8, (i) => '${(i + 1).toString().padLeft(2, '0')}');
+
   // Maid-specific
   List<String> selectedWorks = [];
   final List<String> workOptions = [
@@ -667,161 +679,190 @@ class _BookingFormState extends State<BookingForm> {
   // Milkman-specific
   String? selectedLitres;
   String milkNote = '';
-  
-  
-@override
-Widget build(BuildContext context) {
-  return Scaffold(
-    appBar: AppBar(title: Text('${widget.serviceType} Form')),
-    body: Center(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: 400),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (widget.serviceType == 'Maids (कामवाली)') ...[
-                  SizedBox(height: 12),
-                  Text("Select Work Required:", style: TextStyle(fontWeight: FontWeight.bold)),
-                  SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8.0,
-                    children: workOptions.map((work) {
-                      return FilterChip(
-                        label: Text(work),
-                        selected: selectedWorks.contains(work),
-                        onSelected: (selected) {
-                          setState(() {
-                            selected ? selectedWorks.add(work) : selectedWorks.remove(work);
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  SizedBox(height: 12),
-                  TextFormField(
-                    decoration: InputDecoration(labelText: 'Write note for maid'),
-                    maxLines: 2,
-                    onChanged: (val) => maidNote = val,
-                  ),
-                ] else if (widget.serviceType == 'Milkman (दूधवाला)') ...[
-                  SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    decoration: InputDecoration(labelText: 'Select Litres of Milk'),
-                    items: ['1', '2', '3', '4', '5']
-                        .map((val) => DropdownMenuItem(value: val, child: Text(val)))
-                        .toList(),
-                    onChanged: (val) => setState(() => selectedLitres = val!),
-                    validator: (val) => val == null ? 'Please select litres' : null,
-                  ),
-                  SizedBox(height: 12),
-                  TextFormField(
-                    decoration: InputDecoration(labelText: 'Note for Milkman'),
-                    maxLines: 2,
-                    onChanged: (val) => milkNote = val,
-                  ),
-                ] else ...[
-                  SizedBox(height: 12),
-                  TextFormField(
-                    decoration: InputDecoration(labelText: 'Write your issue here'),
-                    maxLines: 3,
-                    onChanged: (val) => issue = val,
-                    validator: (val) => val == null || val.isEmpty ? 'Please enter issue' : null,
-                  ),
-                ],
 
-                ListTile(
-                  title: Text("Select Date: ${DateFormat('yyyy-MM-dd').format(selectedDate)}"),
-                  trailing: Icon(Icons.calendar_today),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: selectedDate,
-                      firstDate: DateTime.now(),
-                      lastDate: DateTime(2100),
-                    );
-                    if (picked != null) setState(() => selectedDate = picked);
-                  },
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: selectedHour,
-                        items: hours.map((h) => DropdownMenuItem(value: h, child: Text(h))).toList(),
-                        onChanged: (val) => setState(() => selectedHour = val!),
-                        decoration: InputDecoration(labelText: "Time:"),
-                      ),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('${widget.serviceType} Form')),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: 400),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.serviceType == 'Maids (कामवाली)') ...[
+                    SizedBox(height: 12),
+                    Text("Select Work Required:", style: TextStyle(fontWeight: FontWeight.bold)),
+                    SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8.0,
+                      children: workOptions.map((work) {
+                        return FilterChip(
+                          label: Text(work),
+                          selected: selectedWorks.contains(work),
+                          onSelected: (selected) {
+                            setState(() {
+                              selected ? selectedWorks.add(work) : selectedWorks.remove(work);
+                            });
+                          },
+                        );
+                      }).toList(),
                     ),
-                    SizedBox(width: 16),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: selectedMeridiem,
-                        items: ['AM', 'PM'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-                        onChanged: (val) => setState(() => selectedMeridiem = val!),
-                        decoration: InputDecoration(labelText: "AM/PM"),
-                      ),
+                    SizedBox(height: 12),
+                    TextFormField(
+                      decoration: InputDecoration(labelText: 'Write note for maid'),
+                      maxLines: 2,
+                      onChanged: (val) => maidNote = val,
+                    ),
+                  ] else if (widget.serviceType == 'Milkman (दूधवाला)') ...[
+                    SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(labelText: 'Select Litres of Milk'),
+                      items: ['1', '2', '3', '4', '5']
+                          .map((val) => DropdownMenuItem(value: val, child: Text(val)))
+                          .toList(),
+                      onChanged: (val) => setState(() => selectedLitres = val!),
+                      validator: (val) => val == null ? 'Please select litres' : null,
+                    ),
+                    SizedBox(height: 12),
+                    TextFormField(
+                      decoration: InputDecoration(labelText: 'Note for Milkman'),
+                      maxLines: 2,
+                      onChanged: (val) => milkNote = val,
+                    ),
+                  ] else ...[
+                    SizedBox(height: 12),
+                    TextFormField(
+                      decoration: InputDecoration(labelText: 'Write your issue here'),
+                      maxLines: 3,
+                      onChanged: (val) => issue = val,
+                      validator: (val) => val == null || val.isEmpty ? 'Please enter issue' : null,
                     ),
                   ],
-                ),
-                DropdownButtonFormField<String>(
-                  decoration: InputDecoration(labelText: 'Select Block'),
-                  items: ['D', 'E'].map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
-                  onChanged: (val) => setState(() => block = val!),
-                ),
-                TextFormField(
-                  decoration: InputDecoration(labelText: 'Enter Flat No.'),
-                  onChanged: (val) => flat = val,
-                ),
-                SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (_formKey.currentState!.validate()) {
-                      String finalIssue;
-                      if (widget.serviceType == 'Maids (कामवाली)') {
-                        finalIssue = '''Work: ${selectedWorks.join(", ")}
-Note: $maidNote''';
-                      } else if (widget.serviceType == 'Milkman (दूधवाला)') {
-                        finalIssue = '''Milk Required: $selectedLitres Litres
-Note: $milkNote''';
-                      } else {
-                        finalIssue = issue;
-                      }
 
-                      await DatabaseHelper.instance.insertRequest({
-                        'serviceType': widget.serviceType,
-                        'issue': finalIssue,
-                        'date': DateFormat('yyyy-MM-dd').format(selectedDate),
-                        'time': '$selectedHour $selectedMeridiem',
-                        'block': block,
-                        'flat': flat,
-                      });
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Request Submitted!')),
+                  ListTile(
+                    title: Text("Select Date: ${DateFormat('yyyy-MM-dd').format(selectedDate)}"),
+                    trailing: Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate,
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2100),
                       );
-                      Navigator.pop(context);
-                    }
-                  },
-                  child: Text('Submit Request'),
-                )
-              ],
+                      if (picked != null) setState(() => selectedDate = picked);
+                    },
+                  ),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: selectedHour,
+                          items: hours.map((h) => DropdownMenuItem(value: h, child: Text(h))).toList(),
+                          onChanged: (val) => setState(() => selectedHour = val!),
+                          decoration: InputDecoration(labelText: "Time:"),
+                        ),
+                      ),
+                      SizedBox(width: 16),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: selectedMeridiem,
+                          items: ['AM', 'PM'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                          onChanged: (val) => setState(() => selectedMeridiem = val!),
+                          decoration: InputDecoration(labelText: "AM/PM"),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  DropdownButtonFormField<String>(
+                    decoration: InputDecoration(labelText: 'Select Block'),
+                    items: ['D', 'E'].map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
+                    onChanged: (val) => setState(() => block = val!),
+                    validator: (val) => val == null ? 'Please select block' : null,
+                  ),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          decoration: InputDecoration(labelText: 'Floor'),
+                          value: selectedFloor,
+                          items: floors
+                              .map((floor) => DropdownMenuItem(value: floor, child: Text('Floor $floor')))
+                              .toList(),
+                          onChanged: (val) {
+                            setState(() {
+                              selectedFloor = val;
+                              selectedFlatOnFloor = null;
+                            });
+                          },
+                          validator: (val) => val == null ? 'Select floor' : null,
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          decoration: InputDecoration(labelText: 'Flat'),
+                          value: selectedFlatOnFloor,
+                          items: flatsOnFloor
+                              .map((flat) => DropdownMenuItem(value: flat, child: Text('Flat $flat')))
+                              .toList(),
+                          onChanged: (val) => setState(() => selectedFlatOnFloor = val),
+                          validator: (val) => val == null ? 'Select flat' : null,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: () async {
+                      if (_formKey.currentState!.validate()) {
+                        flat = '${selectedFloor ?? ''}${selectedFlatOnFloor ?? ''}';
+
+                        String finalIssue;
+                        if (widget.serviceType == 'Maids (कामवाली)') {
+                          finalIssue = '''Work: ${selectedWorks.join(", ")}
+Note: $maidNote''';
+                        } else if (widget.serviceType == 'Milkman (दूधवाला)') {
+                          finalIssue = '''Milk Required: $selectedLitres Litres
+Note: $milkNote''';
+                        } else {
+                          finalIssue = issue;
+                        }
+
+                        await DatabaseHelper.instance.insertRequest({
+                          'serviceType': widget.serviceType,
+                          'issue': finalIssue,
+                          'date': DateFormat('yyyy-MM-dd').format(selectedDate),
+                          'time': '$selectedHour $selectedMeridiem',
+                          'block': block,
+                          'flat': flat,
+                        });
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Request Submitted!')),
+                        );
+                        Navigator.pop(context);
+                      }
+                    },
+                    child: Text('Submit Request'),
+                  )
+                ],
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
-
-
-
-  
-}
-
 
 // ---------------------- Register Page ----------------------
 class RegisterProvider extends StatefulWidget {
@@ -1070,7 +1111,6 @@ class DatabaseHelper {
   }
 }
 
-
 class ViewRequestsPage extends StatefulWidget {
   @override
   _ViewRequestsPageState createState() => _ViewRequestsPageState();
@@ -1100,18 +1140,15 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
 
   Future<void> loadRequests() async {
     final data = await DatabaseHelper.instance.getRequests(currentPhone);
-    setState(() {
-      requests = data;
-    });
+    setState(() => requests = data);
   }
 
   Future<void> sendExpireNotification(String requestId) async {
-    final url = Uri.parse("http://ngrok:3000/send-notification");
-
+    final url = Uri.parse("https://kalpatru-notifier.onrender.com/send-notification");
     await http.post(url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
-        "topic": "expire_request_$requestId",
+        "topic": "expire_request_\$requestId",
         "title": "Request Taken",
         "body": "This request has been accepted by someone else.",
       }),
@@ -1119,18 +1156,14 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
   }
 
   Future<void> sendFCMToProfessionTopic(String profession) async {
-    final topic = profession
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]'), '_');
-
-    final url = Uri.parse("http://ngrok:3000/send-notification");
-
+    final topic = profession.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+    final url = Uri.parse("https://kalpatru-notifier.onrender.com/send-notification");
     await http.post(url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         "topic": topic,
         "title": "Service Request Cancelled",
-        "body": "A service request for $profession is active again.",
+        "body": "A service request for \$profession is active again.",
       }),
     );
   }
@@ -1140,11 +1173,28 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
     await db.update('requests', {'assignedTo': phone}, where: 'id = ?', whereArgs: [id]);
   }
 
-
   Future<void> cancelRequest(int id, Map<String, dynamic> req) async {
-    await DatabaseHelper.instance.unassignRequest(id);
-    await sendFCMToProfessionTopic(req['serviceType']);
-    loadRequests();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text("Cancel Accepted Request?"),
+        content: Text("Do you really want to cancel and reopen this request for others?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text("No")),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: Text("Yes")),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await DatabaseHelper.instance.unassignRequest(id);
+      await sendFCMToProfessionTopic(req['serviceType']);
+      await loadRequests();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("⚠️ Request cancelled and reactivated."))
+      );
+    }
   }
 
   @override
@@ -1160,53 +1210,74 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
                 final assignedTo = req['assignedTo'];
                 final requestId = req['id'];
 
-                return Card(
-                  color: Colors.black,
-                  margin: EdgeInsets.all(8),
-                  child: ListTile(
-                    title: Text(req['serviceType'], style: TextStyle(color: Colors.white)),
-                    subtitle: Text(
-                      'Issue: ${req['issue']}\n'
-                      'Date: ${req['date']} at ${req['time']}\n'
-                      'Block: ${req['block']} • Flat: ${req['flat']}\n'
-                      'Status: ${assignedTo == null ? "Pending" : assignedTo == currentPhone ? "You Accepted" : "Assigned to other"}',
-                      style: TextStyle(color: Colors.white70),
+               return Card(
+  color: Colors.black,
+  margin: EdgeInsets.all(8),
+  child: ListTile(
+    title: Text(req['serviceType'], style: TextStyle(color: Colors.white)),
+    subtitle: Text(
+      'Issue: ${req['issue']}\n'
+      'Date: ${req['date']} at ${req['time']}\n'
+      'Block: ${req['block']} • Flat: ${req['flat']}\n'
+      'Status: ${assignedTo == null ? "Pending" : assignedTo == currentPhone ? "You Accepted" : "Assigned to other"}',
+      style: TextStyle(color: Colors.white70),
+    ),
+    trailing: assignedTo == null
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(Icons.check, color: Colors.green),
+                onPressed: () async {
+                  await assignRequest(requestId, currentPhone);
+                  await sendExpireNotification(requestId.toString());
+                  await loadRequests();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("✅ Request accepted!"))
+                  );
+                },
+              ),
+              IconButton(
+                icon: Icon(Icons.close, color: Colors.red),
+                onPressed: () async {
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      title: Text("Reject Request?"),
+                      content: Text("Are you sure you want to reject this request?"),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text("No")),
+                        ElevatedButton(onPressed: () => Navigator.pop(context, true), child: Text("Yes")),
+                      ],
                     ),
-                    trailing: assignedTo == null
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-IconButton(
-  icon: Icon(Icons.check, color: Colors.green),
-  onPressed: () async {
-    await assignRequest(requestId, currentPhone); // ✅ method from _ViewRequestsPageState
-    await sendExpireNotification(requestId.toString()); // ✅ notify others
-    await loadRequests(); // ✅ refresh UI
-  },
-),
-IconButton(
-  icon: Icon(Icons.close, color: Colors.red),
-  onPressed: () async {
-    await DatabaseHelper.instance.markRejected(requestId, currentPhone); // ✅ reject request
-    await loadRequests(); // ✅ refresh UI
-  },
-),
+                  );
 
-                            ],
-                          )
-                        : assignedTo == currentPhone
-                            ? TextButton(
-                                onPressed: () => cancelRequest(requestId, req),
-                                child: Text('Cancel', style: TextStyle(color: Colors.orange)),
-                              )
-                            : null,
-                  ),
-                );
+                  if (confirm == true) {
+                    await DatabaseHelper.instance.markRejected(requestId, currentPhone);
+                    await loadRequests();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text("❌ Request rejected."))
+                    );
+                  }
+                },
+              ),
+            ],
+          )
+        : assignedTo == currentPhone
+            ? TextButton(
+                onPressed: () => cancelRequest(requestId, req),
+                child: Text('Cancel', style: TextStyle(color: Colors.orange)),
+              )
+            : null,
+  ),
+);
+
               },
             ),
     );
   }
 }
+
 
 
 
@@ -1434,6 +1505,5 @@ class _EmailAuthScreenState extends State<EmailAuthScreen> {
     );
   }
 }
-
 
 
