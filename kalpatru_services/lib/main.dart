@@ -21,7 +21,7 @@ final FlutterLocalNotificationsPlugin flnp = FlutterLocalNotificationsPlugin();
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   await RingtoneService.playRingtone();
-  print("📩 Background FCM Message: ${message.messageId}");
+  print("📩 Background FCM Message: \${message.messageId}");
 }
 
 Future<void> acceptRequest(String requestId) async {
@@ -184,6 +184,38 @@ class KalptaruApp extends StatelessWidget {
         textTheme: ThemeData.dark().textTheme.apply(fontFamily: 'Roboto'),
       ),
       home: AuthGateScreen(),
+      routes: {
+        '/selectService': (context) => SelectServicePage(),
+      },
+    );
+  }
+}
+
+class SelectServicePage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final services = [
+      'Maids (कामवाली)',
+      'Electrician (बिजली मिस्त्री)',
+      'Milkman (दूधवाला)',
+      'Iron (कपड़े प्रेस)',
+      'Plumber (प्लंबर)',
+    ];
+
+    return Scaffold(
+      appBar: AppBar(title: Text("Select Service")),
+      body: ListView.builder(
+        itemCount: services.length,
+        itemBuilder: (context, index) => ListTile(
+          title: Text(services[index]),
+          trailing: Icon(Icons.arrow_forward_ios),
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(
+              builder: (_) => BookingForm(serviceType: services[index]),
+            ));
+          },
+        ),
+      ),
     );
   }
 }
@@ -455,10 +487,17 @@ class _MainDashboardState extends State<MainDashboard> {
             title: Text('Kalptaru Dashboard'),
             actions: [
               IconButton(
-                icon: Icon(Icons.logout),
-                tooltip: 'Logout',
-                onPressed: logoutUser,
-              )
+  icon: Icon(Icons.logout),
+  onPressed: () async {
+    await DatabaseHelper.instance.logoutAll();  // 👈 Call here
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => EmailAuthScreen()),
+      (route) => false,
+    );
+  },
+)
+
             ],
           ),
           body: role.isEmpty
@@ -492,10 +531,9 @@ class _MainDashboardState extends State<MainDashboard> {
                                 _tile(context, Icons.notifications_active, 'View Requests', () {
                                   Navigator.push(context, MaterialPageRoute(builder: (_) => ViewRequestsPage()));
                                 }),
-                             _tile(context, Icons.home_repair_service, 'Get Services', () {
-  Navigator.push(context, MaterialPageRoute(builder: (_) => BookingForm(serviceType: 'Select Service')));
-}),
-
+                              _tile(context, Icons.home_repair_service, 'Get Services', () {
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => MainDashboard(phone: widget.phone)));
+                              }),
                               _tile(context, Icons.info_outline, 'About Us', () {
                                 Navigator.push(context, MaterialPageRoute(builder: (_) => AboutPage()));
                               }),
