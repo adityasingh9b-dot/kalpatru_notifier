@@ -13,6 +13,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final FlutterLocalNotificationsPlugin flnp = FlutterLocalNotificationsPlugin();
@@ -282,19 +283,16 @@ class _AuthGateScreenState extends State<AuthGateScreen> {
         );
       }
 
-      Map<String, dynamic> data = {
-        'name': name.isEmpty ? 'User' : name,
-        'phone': email,
-        'role': role,
-        'isLoggedIn': 1,
-      };
+   final userDoc = FirebaseFirestore.instance.collection('users').doc(email);
 
-      if (role == 'Worker') {
-        data['profession'] = profession;
-        await DatabaseHelper.instance.insertWorker(data);
-      } else {
-        await DatabaseHelper.instance.insertUser(data);
-      }
+await userDoc.set({
+  'name': name.isEmpty ? 'User' : name,
+  'phone': email,
+  'role': role,
+  'profession': role == 'Worker' ? profession : null,
+  'createdAt': FieldValue.serverTimestamp(),
+});
+
 
       Navigator.pushReplacement(
         context,
@@ -861,39 +859,44 @@ class _BookingFormState extends State<BookingForm> {
                   ),
 
                   SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: () async {
-                      if (_formKey.currentState!.validate()) {
-                        flat = '${selectedFloor ?? ''}${selectedFlatOnFloor ?? ''}';
+                  
+                  
+     ElevatedButton(
+  onPressed: () async {
+    if (_formKey.currentState!.validate()) {
+      String fullFlat = "${selectedFloor ?? ''}${selectedFlatOnFloor ?? ''}";
 
-                        String finalIssue;
-                        if (widget.serviceType == 'Maids (कामवाली)') {
-                          finalIssue = '''Work: ${selectedWorks.join(", ")}
-Note: $maidNote''';
-                        } else if (widget.serviceType == 'Milkman (दूधवाला)') {
-                          finalIssue = '''Milk Required: $selectedLitres Litres
-Note: $milkNote''';
-                        } else {
-                          finalIssue = issue;
-                        }
+      await FirebaseFirestore.instance.collection('requests').add({
+        'serviceType': widget.serviceType,
+        'block': block,
+        'flat': fullFlat,
+        'note': widget.serviceType == 'Maids (कामवाली)' ? maidNote :
+                widget.serviceType == 'Milkman (दूधवाला)' ? milkNote : issue,
+        'time': "$selectedHour $selectedMeridiem",
+        'date': DateFormat('yyyy-MM-dd').format(selectedDate),
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
 
-                        await DatabaseHelper.instance.insertRequest({
-                          'serviceType': widget.serviceType,
-                          'issue': finalIssue,
-                          'date': DateFormat('yyyy-MM-dd').format(selectedDate),
-                          'time': '$selectedHour $selectedMeridiem',
-                          'block': block,
-                          'flat': flat,
-                        });
+      final url = Uri.parse("https://kalpatru-notifier.onrender.com/send-notification");
+      await http.post(url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          "topic": widget.serviceType,
+          "title": "New Service Request",
+          "body": "${widget.serviceType} requested at Block $block, Flat $fullFlat"
+        }),
+      );
 
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Request Submitted!')),
-                        );
-                        Navigator.pop(context);
-                      }
-                    },
-                    child: Text('Submit Request'),
-                  )
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Request sent successfully")));
+      Navigator.pop(context);
+    }
+  },
+  child: Text("Submit Request"),
+)
+
+                  
+                  
                 ],
               ),
             ),
@@ -1211,6 +1214,20 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
   Future<void> assignRequest(int id, String phone) async {
     final db = await DatabaseHelper.instance.database;
     await db.update('requests', {'assignedTo': phone}, where: 'id = ?', whereArgs: [id]);
+    
+    final requests = await FirebaseFirestore.instance
+    .collection('requests')
+    .where('block', isEqualTo: req['block'])
+    .where('flat', isEqualTo: req['flat'])
+    .where('date', isEqualTo: req['date'])
+    .where('time', isEqualTo: req['time'])
+    .get();
+
+for (var doc in requests.docs) {
+  await doc.reference.update({'assignedTo': phone});
+}
+
+    
   }
 
   Future<void> cancelRequest(int id, Map<String, dynamic> req) async {
@@ -1409,6 +1426,17 @@ class _RegisterExtraInfoScreenState extends State<RegisterExtraInfoScreen> {
                 } else {
                   await DatabaseHelper.instance.insertUser(userData);
                 }
+                
+                final usersCollection = FirebaseFirestore.instance.collection('users');
+await usersCollection.doc(widget.email).set({
+  'name': name,
+  'email': widget.email,
+  'role': role,
+  if (role == 'Worker') 'profession': profession,
+  'isLoggedIn': true,
+  'createdAt': FieldValue.serverTimestamp(),
+});
+
 
                 Navigator.pushReplacement(
                   context,
