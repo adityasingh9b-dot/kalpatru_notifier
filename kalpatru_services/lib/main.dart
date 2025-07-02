@@ -492,9 +492,10 @@ class _MainDashboardState extends State<MainDashboard> {
                                 _tile(context, Icons.notifications_active, 'View Requests', () {
                                   Navigator.push(context, MaterialPageRoute(builder: (_) => ViewRequestsPage()));
                                 }),
-                              _tile(context, Icons.home_repair_service, 'Get Services', () {
-                                Navigator.push(context, MaterialPageRoute(builder: (_) => MainDashboard(phone: widget.phone)));
-                              }),
+                             _tile(context, Icons.home_repair_service, 'Get Services', () {
+  Navigator.push(context, MaterialPageRoute(builder: (_) => BookingForm(serviceType: 'Select Service')));
+}),
+
                               _tile(context, Icons.info_outline, 'About Us', () {
                                 Navigator.push(context, MaterialPageRoute(builder: (_) => AboutPage()));
                               }),
