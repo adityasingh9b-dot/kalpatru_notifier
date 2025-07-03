@@ -160,7 +160,7 @@ void main() async {
         );
         if (confirmed == true) {
           await acceptRequest(requestId);
-          await FirebaseMessaging.instance.unsubscribeFromTopic("expire_request_\$requestId");
+          await FirebaseMessaging.instance.unsubscribeFromTopic("expire_request_$requestId");
         }
       } else if (actionId.startsWith('REJECT_')) {
         final requestId = actionId.replaceFirst('REJECT_', '');
@@ -907,10 +907,6 @@ class _BookingFormState extends State<BookingForm> {
 }
 
 // ---------------------- Register Page ----------------------
-class RegisterProvider extends StatefulWidget {
-  @override
-  _RegisterProviderState createState() => _RegisterProviderState();
-}
 
 class _RegisterProviderState extends State<RegisterProvider> {
   final _formKey = GlobalKey<FormState>();
@@ -1163,18 +1159,26 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
     initWorker();
   }
 
-  Future<void> initWorker() async {
-    final workers = await DatabaseHelper.instance.getWorkers();
-    final loggedIn = workers.firstWhere(
-      (w) => w['isLoggedIn'] == 1,
-      orElse: () => <String, dynamic>{},
+ Future<void> initWorker() async {
+  final workers = await DatabaseHelper.instance.getWorkers();
+  final loggedIn = workers.firstWhere(
+    (w) => w['isLoggedIn'] == 1,
+    orElse: () => <String, dynamic>{},
+  );
+
+  if (loggedIn.isNotEmpty) {
+    currentPhone = loggedIn['phone'];
+    currentProfession = loggedIn['profession']; // ✅ profession stored
+
+    // ✅ Now we can safely subscribe
+    await FirebaseMessaging.instance.subscribeToTopic(
+      currentProfession.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]', '_')),
     );
-    if (loggedIn.isNotEmpty) {
-      currentPhone = loggedIn['phone'];
-      currentProfession = loggedIn['profession']; // ✅ profession stored
-      await loadRequests(); // ✅ cleaner call
-    }
+
+    await loadRequests(); // ✅ cleaner call
   }
+}
+
 
   Future<void> loadRequests() async {
     final snapshot = await FirebaseFirestore.instance
