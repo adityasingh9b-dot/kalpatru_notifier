@@ -113,6 +113,15 @@ Future<void> handleRequestNotification(Map<String, dynamic> data) async {
   await RingtoneService.playRingtone();
 }
 
+const List<String> professionsList = [
+  '🧹 Maids (कामवाली)',
+  '💡 Electrician (बिजली मिस्त्री)',
+  '🥛 Milkman (दूधवाला)',
+  '🧺 Iron (कपड़े प्रेस)',
+  '🔧 Plumber (प्लंबर)',
+];
+
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isLinux) {
@@ -345,16 +354,13 @@ await userDoc.set({
                 if (role == 'Worker')
 DropdownButtonFormField<String>(
   value: profession,
+  items: professionsList
+      .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+      .toList(),
   onChanged: (val) => setState(() => profession = val!),
   decoration: InputDecoration(labelText: 'Select Profession'),
-  items: [
-    '🧹 Maids (कामवाली)',
-    '💡 Electrician (बिजली मिस्त्री)',
-    '🥛 Milkman (दूधवाला)',
-    '🧺 Iron (कपड़े प्रेस)',
-    '🔧 Plumber (प्लंबर)',
-  ].map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
 ),
+
 
               ],
               SizedBox(height: 16),
@@ -908,6 +914,12 @@ class _BookingFormState extends State<BookingForm> {
 
 // ---------------------- Register Page ----------------------
 
+class RegisterProvider extends StatefulWidget {
+  @override
+  _RegisterProviderState createState() => _RegisterProviderState();
+}
+
+
 class _RegisterProviderState extends State<RegisterProvider> {
   final _formKey = GlobalKey<FormState>();
   String name = '', email = '', profession = '';
@@ -937,11 +949,16 @@ class _RegisterProviderState extends State<RegisterProvider> {
                     onChanged: (val) => email = val,
                     validator: (val) => val == null || val.isEmpty ? 'Enter email' : null,
                   ),
-                  TextFormField(
-                    decoration: InputDecoration(labelText: 'Profession'),
-                    onChanged: (val) => profession = val,
-                    validator: (val) => val == null || val.isEmpty ? 'Enter profession' : null,
-                  ),
+                  DropdownButtonFormField<String>(
+  value: profession.isNotEmpty ? profession : null,
+  items: professionsList
+      .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+      .toList(),
+  onChanged: (val) => setState(() => profession = val!),
+  validator: (val) => val == null || val.isEmpty ? 'Select profession' : null,
+  decoration: InputDecoration(labelText: 'Select Profession'),
+),
+
                   SizedBox(height: 20),
                   ElevatedButton(
                     onPressed: () async {
@@ -1172,7 +1189,7 @@ class _ViewRequestsPageState extends State<ViewRequestsPage> {
 
     // ✅ Now we can safely subscribe
     await FirebaseMessaging.instance.subscribeToTopic(
-      currentProfession.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]', '_')),
+      currentProfession.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_'),
     );
 
     await loadRequests(); // ✅ cleaner call
